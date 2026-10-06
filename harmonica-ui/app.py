@@ -122,6 +122,14 @@ st.markdown('''<style>
 .hca-badge--ready {color:#2F6B57;background:#E8F3EE;}
 .hca-badge--queued {color:#A33B5C;background:#F9ECEF;}
 .hca-badge--off {color:#4B5563;background:#F3F4F6;}
+/* Show the full text of buttons and metrics: wrap onto more lines instead of ending with an ellipsis */
+:is([data-testid="stButton"],[data-testid="stDownloadButton"],[data-testid="stFormSubmitButton"],[data-testid="stLinkButton"]) :is(button,a) {
+  height:auto!important;min-height:2.5rem;}
+:is([data-testid="stButton"],[data-testid="stDownloadButton"],[data-testid="stFormSubmitButton"],[data-testid="stLinkButton"]) :is(button,a) :is(div,span,p) {
+  overflow:visible!important;text-overflow:clip!important;white-space:normal!important;overflow-wrap:break-word;text-align:center;}
+:is([data-testid="stMetricLabel"],[data-testid="stMetricValue"],[data-testid="stMetricDelta"]),
+:is([data-testid="stMetricLabel"],[data-testid="stMetricValue"],[data-testid="stMetricDelta"]) * {
+  overflow:visible!important;text-overflow:clip!important;white-space:normal!important;overflow-wrap:break-word;}
 </style>''', unsafe_allow_html=True)
 
 
@@ -339,6 +347,8 @@ with tabs['Prepare']:
     with upload_col:
         with st.container(border=True):
             st.subheader('Upload your own questionnaires')
+            st.caption('Prepare one CSV file with one row per item. It can include several questionnaires: '
+                       'the questionnaire column tells them apart.')
             upload = st.file_uploader('Upload CSV or Excel', type=['csv', 'xlsx'])
             sample = Path(__file__).with_name('example_items.csv').read_bytes()
             st.download_button('Download input template', sample, 'example_items.csv', 'text/csv')
