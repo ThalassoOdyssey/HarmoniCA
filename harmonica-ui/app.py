@@ -711,17 +711,17 @@ if 'Visual dashboard' in tabs:
                 st.plotly_chart(fig,width='stretch',key='flow')
                 a,b=st.columns([3,2])
                 with a:
-                    st.subheader('Coverage map')
+                    st.subheader('Coverage map',anchor=False)
                     st.caption('Coverage is item composition, not harmonized participant severity.')
                     percent=st.toggle('Show percentage within each questionnaire',value=True)
                     st.plotly_chart(coverage_figure(subset,percent),width='stretch',key='coverage')
                 with b:
-                    st.subheader('Assignment confidence')
+                    st.subheader('Assignment confidence',anchor=False)
                     st.caption('Inventory confidence may reflect stored expert agreement rather than a fresh model score; full distributions are unavailable for those rows.')
                     st.plotly_chart(confidence_figure(subset),width='stretch',key='confidence')
                 listed=subset.head(6)
                 head,jump=st.columns([3,1],vertical_alignment='bottom')
-                head.subheader('Items behind the view')
+                head.subheader('Items behind the view',anchor=False)
                 head.caption('Items that match the filters above' + (f' (showing the first 6 of {len(subset)})' if len(subset)>6 else f' ({len(subset)})') + '.')
                 jump.button('Open Item inspector →',width='stretch',on_click=go_to_tab,args=('Item inspector',),key='open_inspector')
                 with st.container(border=True):
