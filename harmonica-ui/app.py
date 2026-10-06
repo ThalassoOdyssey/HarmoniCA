@@ -130,6 +130,12 @@ st.markdown('''<style>
 :is([data-testid="stMetricLabel"],[data-testid="stMetricValue"],[data-testid="stMetricDelta"]),
 :is([data-testid="stMetricLabel"],[data-testid="stMetricValue"],[data-testid="stMetricDelta"]) * {
   overflow:visible!important;text-overflow:clip!important;white-space:normal!important;overflow-wrap:break-word;}
+/* "Keep this page open" banner shown on every tab while a run is in progress */
+.hca-run-banner {display:flex;align-items:flex-start;gap:14px;margin:0 0 18px;padding:16px 20px;border:1px solid #F0CF8E;
+                 border-left:6px solid #E09F1F;border-radius:10px;background:#FFF6E5;}
+.hca-run-banner-icon {font-size:22px;line-height:1.2;color:#B97A0B;}
+.hca-run-banner-title {font-size:16px;font-weight:700;color:#6B4200;margin-bottom:2px;}
+.hca-run-banner p {margin:0;font-size:14px;color:#5C4306;}
 </style>''', unsafe_allow_html=True)
 
 
@@ -265,8 +271,10 @@ def source_card_html(file_name, size_bytes, n_total):
             f'<span class="hca-tag">Inventory check complete</span></div>')
 
 
-KEEP_OPEN_HTML = ('<div class="hca-note"><div class="hca-note-title">&#9432; Keep this page open</div>'
-                  '<p>Results will be available once processing is complete. Model suggestions should be reviewed before export.</p></div>')
+RUN_BANNER_HTML = ('<div class="hca-run-banner" role="alert"><div class="hca-run-banner-icon">&#9888;</div><div>'
+                   '<div class="hca-run-banner-title">Keep this page open while HarmoniCA runs</div>'
+                   '<p>Closing or refreshing this tab loses the run and its results. You can switch between tabs while you wait.</p>'
+                   '</div></div>')
 st.markdown('''
 <div class="hca-header">
   <div class="hca-brand">
@@ -332,6 +340,8 @@ if has_result:
 tab_labels.append('Models & dimensions')
 if st.session_state.get('main_tab') not in tab_labels:
     st.session_state.main_tab = 'Prepare'
+if running:
+    st.markdown(RUN_BANNER_HTML, unsafe_allow_html=True)
 # The tabs track their state under 'main_tab', so buttons can switch tabs by setting it.
 tabs = dict(zip(tab_labels, st.tabs(tab_labels, key='main_tab', on_change='rerun')))
 
@@ -555,8 +565,6 @@ def run_view(job, live):
     left_col.markdown(activity_card_html(job['activity'], live=live), unsafe_allow_html=True)
     right_col.markdown(run_card_html(job['source_name'], job['n_total'], job['n_inventory'], job['n_model'], elapsed,
                                      job['force']), unsafe_allow_html=True)
-    if live:
-        right_col.markdown(KEEP_OPEN_HTML, unsafe_allow_html=True)
 
 
 if 'Inventory check' in tabs:
