@@ -20,7 +20,7 @@ CATALOG = json.loads(Path(__file__).with_name('assets').joinpath('model_catalog.
 if os.environ.get('HARMONICA_SOURCE_DIR'):
     sys.path.insert(0, os.environ['HARMONICA_SOURCE_DIR'])
 
-st.set_page_config(page_title='HarmoniCA | Research workspace', page_icon='🎼', layout='wide')
+st.set_page_config(page_title='HarmoniCA', page_icon='🎼', layout='wide')
 # Header and card styles from the HarmoniCA Figma template (shared with the Gradio app)
 st.markdown('''<style>
 .hca-header {display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
@@ -32,7 +32,6 @@ st.markdown('''<style>
 .hca-links {display:flex;align-items:center;gap:24px;font-size:14px;}
 .hca-links a {color:#4B5563!important;text-decoration:none;}
 .hca-links a:hover {color:#A33B5C!important;}
-.hca-workspace {display:inline-flex;align-items:center;gap:6px;color:#A33B5C;font-weight:500;}
 .hca-eyebrow {font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#A33B5C;margin-top:4px;}
 .hca-lead {font-size:15px;color:#4B5563;margin:4px 0 8px;}
 /* st.metric as the Figma stat cards */
@@ -308,13 +307,8 @@ st.markdown('''
   </div>
   <div class="hca-links">
     <a href="https://github.com/julia-pfarr/HarmoniCA#readme" target="_blank">Documentation &#8599;</a>
-    <span class="hca-workspace"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M9 3h6M10 3v6L4.5 19A1.5 1.5 0 0 0 5.8 21h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7.5 15h9"/></svg>
-      Research workspace</span>
   </div>
 </div>
-<div class="hca-eyebrow">Research workspace</div>
 ''', unsafe_allow_html=True)
 # The workflow stepper sits under the header on every tab; the Check & harmonize
 # code below fills it with the current step.
@@ -361,12 +355,31 @@ if job is not None:
 if has_result:
     tab_labels += ['Visual dashboard', 'Item inspector']
 tab_labels.append('Models & dimensions')
-if st.session_state.get('main_tab') not in tab_labels:
-    st.session_state.main_tab = 'Prepare'
+# The tab titles show where the run is at, following the same steps as the progress bar above (kept from the
+# previous run): a check for finished stages, a sync arrow while the model runs, a dot for the stage you are at.
+STAGE_STEPS = {'Prepare': 1, 'Inventory check': 2, 'Harmonization': 3, 'Visual dashboard': 4}
+current_step = st.session_state.get('step', 1)
+
+
+def tab_title(tab_id):
+    stage = STAGE_STEPS.get(tab_id)
+    if stage is None or stage > current_step:
+        return tab_id
+    if stage < current_step:
+        return f':material/check_circle: {tab_id}'
+    return f'{":material/sync:" if running and stage == 3 else ":material/fiber_manual_record:"} {tab_id}'
+
+
+tab_titles = {tab_id: tab_title(tab_id) for tab_id in tab_labels}
+# The selected tab is stored under its title, and titles change as the run moves on: translate to the new title.
+stored_tab = st.session_state.get('main_tab')
+selected_tab = st.session_state.get('tab_ids_by_title', {}).get(stored_tab, stored_tab)
+st.session_state.main_tab = tab_titles.get(selected_tab, tab_titles['Prepare'])
+st.session_state.tab_ids_by_title = {title: tab_id for tab_id, title in tab_titles.items()}
 if running:
     st.markdown(RUN_BANNER_HTML, unsafe_allow_html=True)
-# The tabs track their state under 'main_tab', so buttons can switch tabs by setting it.
-tabs = dict(zip(tab_labels, st.tabs(tab_labels, key='main_tab', on_change='rerun')))
+# The tabs track their state under 'main_tab', so buttons can switch tabs by setting it (go_to_tab, with the tab's name).
+tabs = dict(zip(tab_labels, st.tabs([tab_titles[tab_id] for tab_id in tab_labels], key='main_tab', on_change='rerun')))
 
 items = None
 source_name = 'example_items.csv'
@@ -489,8 +502,11 @@ if not selected.empty:
 
 # Results are kept when the selection changes; they're only replaced by a new run.
 stale = has_result and st.session_state.get('result_fingerprint') != fingerprint
-stepper_slot.markdown(render_stepper(1 if selected.empty else 3 if running else 4 if has_result and not stale else 2),
-                      unsafe_allow_html=True)
+step_now = 1 if selected.empty else 3 if running else 4 if has_result and not stale else 2
+stepper_slot.markdown(render_stepper(step_now), unsafe_allow_html=True)
+st.session_state.step = step_now
+if step_now != current_step:
+    st.rerun()  # the tab titles above were drawn for the previous step
 
 
 def stale_notice():
