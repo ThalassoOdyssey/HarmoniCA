@@ -6,7 +6,7 @@ import shutil
 import importlib.util
 import sys
 import html
-from visuals import flow_figure, coverage_figure, confidence_figure, decorate, probabilities
+from visuals import comparison_figure, flow_figure, coverage_figure, confidence_figure, decorate, probabilities
 import plotly.express as px
 import threading
 import time
@@ -393,9 +393,10 @@ with tabs['Prepare']:
     with upload_col:
         with st.container(border=True):
             st.subheader('Upload your own questionnaires')
-            st.caption('Prepare one CSV file with one row per item. It can include several questionnaires: '
+            st.caption('Upload CSV or Excel files with one row per item. Each file can include several questionnaires: '
                        'the questionnaire column tells them apart.')
-            upload = st.file_uploader('Upload CSV or Excel', type=['csv', 'xlsx'])
+            uploads = st.file_uploader('Upload CSV or Excel files', type=['csv', 'xlsx'], accept_multiple_files=True)
+            st.caption('Upload only one format per questionnaire to avoid duplicate items.')
             sample = Path(__file__).with_name('example_items.csv').read_bytes()
             st.download_button('Download input template', sample, 'example_items.csv', 'text/csv')
     with inventory_col:
@@ -415,22 +416,26 @@ with tabs['Prepare']:
                                 'Check how your file is read, then review every item that will be harmonized.'),
                 unsafe_allow_html=True)
     uploaded_items = None
-    if upload is not None:
+    uploaded_frames, upload_summary = [], []
+    upload_valid = True
+    for index, upload in enumerate(uploads):
         raw_upload = upload.getvalue()
+        file_key = hashlib.sha256(upload.name.encode()+raw_upload).hexdigest()[:16]+'_'+str(index)
         with st.container(border=True):
-            st.subheader('Format your uploaded file')
+            st.subheader('Format: '+upload.name)
             try:
                 if len(raw_upload) > 10*1024*1024:
                     raise ValueError('File exceeds 10 MB.')
                 if upload.name.lower().endswith('.xlsx'):
                     workbook = pd.ExcelFile(io.BytesIO(raw_upload))
-                    sheet = st.selectbox('Worksheet', workbook.sheet_names)
+                    sheet = st.selectbox('Worksheet', workbook.sheet_names, key='sheet_'+file_key)
+                    file_key += hashlib.sha256(sheet.encode()).hexdigest()[:8]
                     frame = pd.read_excel(workbook, sheet_name=sheet, dtype=str).fillna('')
                 else:
                     detected = detect_separator(raw_upload)
                     separator = st.selectbox('CSV separator', SEPARATORS, index=SEPARATORS.index(detected),
                                              format_func=lambda x: {',':'Comma',';':'Semicolon','\t':'Tab'}[x],
-                                             key='sep_'+hashlib.sha256(raw_upload).hexdigest()[:10],
+                                             key='sep_'+file_key,
                                              help='Detected automatically from the header row. Change it if columns look wrong.')
                     frame = pd.read_csv(io.BytesIO(raw_upload), sep=separator, dtype=str, keep_default_na=False, encoding='utf-8-sig')
                 frame.columns = frame.columns.astype(str).str.strip()
@@ -443,7 +448,7 @@ with tabs['Prepare']:
                     options = ['— Select —'] + list(frame.columns)
                     with cols[i % 2]:
                         mapping[field] = st.selectbox(field, options, index=options.index(field) if field in options else 0,
-                                                      key=f'map_{field}_{hashlib.sha256(raw_upload).hexdigest()[:10]}')
+                                                      key=f'map_{field}_{file_key}')
                 chosen = list(mapping.values())
                 if '— Select —' in chosen:
                     st.warning('Match all four columns to include this file.')
@@ -451,21 +456,49 @@ with tabs['Prepare']:
                     st.error('Choose a different source column for each field.')
                 else:
                     mapped = pd.DataFrame({field: frame[column] for field, column in mapping.items()})
-                    uploaded_items = parse_items(mapped.to_csv(index=False).encode())
-                    unknown = set(uploaded_items.construct)-set(CATALOG['CONSTRUCTS'])
+                    edited = st.data_editor(mapped, hide_index=True, num_rows='dynamic', width='stretch',
+                                            key='input_'+file_key+hashlib.sha256(str(mapping).encode()).hexdigest())
+                    file_items = parse_items(edited.to_csv(index=False).encode())
+                    unknown = set(file_items.construct)-set(CATALOG['CONSTRUCTS'])
                     if unknown:
-                        uploaded_items = None
                         raise ValueError('Unsupported constructs: '+', '.join(sorted(unknown))+'. Supported: '+', '.join(CATALOG['CONSTRUCTS']))
+                    uploaded_frames.append(file_items)
+                    upload_summary.append({'File': upload.name, 'Items': len(file_items),
+                                           'Questionnaires': ', '.join(sorted(file_items.questionnaire.unique()))})
             except Exception as exc:
-                st.error(f'Input needs attention: {exc}')
+                st.error(f'{upload.name}: {exc}')
+
+    if uploads:
+        upload_valid = len(uploaded_frames) == len(uploads)
+        if upload_valid:
+            try:
+                uploaded_items = parse_items(pd.concat(uploaded_frames, ignore_index=True).to_csv(index=False).encode())
+                st.dataframe(pd.DataFrame(upload_summary), hide_index=True, width='stretch')
+                st.success(f'{len(uploads)} files ready: {len(uploaded_items)} uploaded items.')
+            except Exception as exc:
+                upload_valid = False
+                st.error(f'Combined uploads need attention: {exc}')
+        if not upload_valid:
+            st.warning('Resolve errors in every uploaded file before continuing.')
 
     sources = [(frame_, label) for frame_, label in ((inventory_items, 'Inventory'), (uploaded_items, 'Uploaded')) if frame_ is not None and not frame_.empty]
-    if sources:
-        shown = pd.concat([f.assign(source=label) for f, label in sources], ignore_index=True)
-        shown = shown.drop_duplicates(['construct', 'questionnaire', 'item_id'], keep='last').reset_index(drop=True)
-        items = shown[COLUMNS]
-        source_name = (upload.name if uploaded_items is not None and inventory_items.empty else
-                       'reference_items.csv' if uploaded_items is None else f'{upload.name} + inventory')
+    if sources and upload_valid:
+        try:
+            shown = pd.concat([f.assign(source=label) for f, label in sources], ignore_index=True)
+            keys = ['construct', 'questionnaire', 'item_id']
+            # An exact item present in both sources is counted once. Conflicting wording must be reviewed.
+            overlaps = shown[shown.duplicated(keys, keep=False)]
+            if not overlaps.empty and overlaps.groupby(keys).item_text.nunique().gt(1).any():
+                raise ValueError('An uploaded item shares an inventory item key but has different wording. Resolve the conflict before running.')
+            if not overlaps.empty:
+                st.info('Exact items selected from both the inventory and uploads are counted once.')
+            shown = shown.drop_duplicates(keys, keep='last').reset_index(drop=True)
+            items = parse_items(shown[COLUMNS].to_csv(index=False).encode())
+            names = ', '.join(upload.name for upload in uploads)
+            source_name = names if inventory_items.empty else 'reference_items.csv' if uploaded_items is None else names+' + inventory'
+        except Exception as exc:
+            items = None
+            st.error(f'Combined input needs attention: {exc}')
     if items is None:
         selected = pd.DataFrame(columns=COLUMNS)
         constructs = []
@@ -735,6 +768,8 @@ if 'Visual dashboard' in tabs:
                     st.subheader('Assignment confidence',anchor=False)
                     st.caption('Inventory confidence may reflect stored expert agreement rather than a fresh model score; full distributions are unavailable for those rows.')
                     st.plotly_chart(confidence_figure(subset),width='stretch',key='confidence')
+                st.subheader('Compare questionnaires', anchor=False)
+                st.plotly_chart(comparison_figure(subset), width='stretch', key='questionnaire_comparison')
                 listed=subset.head(6)
                 head,jump=st.columns([3,1],vertical_alignment='bottom')
                 head.subheader('Items behind the view',anchor=False)
