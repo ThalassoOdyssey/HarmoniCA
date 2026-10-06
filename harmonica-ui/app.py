@@ -83,6 +83,17 @@ st.markdown('''<style>
 .hca-card-title {font-size:18px;font-weight:600;color:#1F2430;}
 .hca-card-sub {font-size:13px;color:#6B7280;margin-top:2px;}
 .hca-pill {font-size:12px;color:#4B5563;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:6px;padding:3px 10px;white-space:nowrap;}
+/* "Items behind the view" list on the Visual dashboard */
+.hca-item-row {display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding:12px 0;border-top:1px solid #EEF0F3;}
+.hca-item-row:first-child {border-top:0;padding-top:4px;}
+.hca-item-main {flex:1 1 0;min-width:0;}
+.hca-item-meta {font-size:12px;color:#6B7280;}
+.hca-item-text {font-size:15px;color:#1F2430;margin-top:2px;overflow-wrap:anywhere;}
+.hca-item-side {flex:0 0 34%;display:flex;flex-direction:column;align-items:flex-end;gap:4px;text-align:right;}
+.hca-item-side .hca-pill {white-space:normal;text-align:right;}
+.hca-item-conf {font-size:12px;color:#6B7280;}
+.hca-item-conf--low {color:#A33B5C;font-weight:600;}
+@media (max-width:720px) {.hca-item-row {flex-direction:column;gap:6px;} .hca-item-side {flex:none;align-items:flex-start;text-align:left;}}
 .hca-progress-head {display:flex;align-items:flex-end;justify-content:space-between;margin:18px 0 12px;}
 .hca-big {font-size:38px;font-weight:600;color:#1F2430;}
 .hca-big-total {font-size:20px;color:#6B7280;}
@@ -261,6 +272,18 @@ def routing_card_html(n_total, n_inventory, n_duplicate, n_model, force):
                       f'<span class="hca-badge hca-badge--{kind}">{badge}</span></div>'
                       for icon, title, sub, badge, kind in rows)
             + '</div>')
+
+
+def item_row_html(row, threshold):
+    """One row of the 'Items behind the view' list: the item, its assigned dimension and the engine confidence."""
+    conf = pd.to_numeric(row.confidence, errors='coerce')
+    low = bool(pd.notna(conf) and conf < threshold)
+    conf_text = 'Confidence unavailable' if pd.isna(conf) else f'{conf:.1%}' + (' · flagged' if low else '')
+    return (f'<div class="hca-item-row"><div class="hca-item-main">'
+            f'<div class="hca-item-meta">{html.escape(str(row.questionnaire))} · {html.escape(str(row.item_id))}</div>'
+            f'<div class="hca-item-text">{html.escape(str(row.item_text))}</div></div>'
+            f'<div class="hca-item-side"><span class="hca-pill">{html.escape(str(row.dimension_label))}</span>'
+            f'<span class="hca-item-conf{" hca-item-conf--low" if low else ""}">{conf_text}</span></div></div>')
 
 
 def source_card_html(file_name, size_bytes, n_total):
@@ -689,20 +712,20 @@ if 'Visual dashboard' in tabs:
                 a,b=st.columns([3,2])
                 with a:
                     st.subheader('Coverage map')
+                    st.caption('Coverage is item composition, not harmonized participant severity.')
                     percent=st.toggle('Show percentage within each questionnaire',value=True)
                     st.plotly_chart(coverage_figure(subset,percent),width='stretch',key='coverage')
                 with b:
                     st.subheader('Assignment confidence')
+                    st.caption('Inventory confidence may reflect stored expert agreement rather than a fresh model score; full distributions are unavailable for those rows.')
                     st.plotly_chart(confidence_figure(subset),width='stretch',key='confidence')
-                st.caption('Coverage is item composition, not harmonized participant severity. Inventory confidence may reflect stored expert agreement rather than a fresh model score; full distributions are unavailable for those rows.')
-                st.subheader('Items behind the view')
-                st.caption('Filters above update these cards. Open Item inspector to record decisions.')
-                for _,card in subset.head(6).iterrows():
-                    with st.container(border=True):
-                        st.caption(f'{card.questionnaire} · {card.item_id}')
-                        st.write(card.item_text)
-                        st.write('**'+card.dimension_label+'**')
-                if len(subset)>6:st.caption(f'Showing the first 6 of {len(subset)} filtered items; inspect every item in Item inspector.')
+                listed=subset.head(6)
+                head,jump=st.columns([3,1],vertical_alignment='bottom')
+                head.subheader('Items behind the view')
+                head.caption('Items that match the filters above' + (f' (showing the first 6 of {len(subset)})' if len(subset)>6 else f' ({len(subset)})') + '.')
+                jump.button('Open Item inspector →',width='stretch',on_click=go_to_tab,args=('Item inspector',),key='open_inspector')
+                with st.container(border=True):
+                    st.markdown(''.join(item_row_html(item,threshold) for item in listed.itertuples()),unsafe_allow_html=True)
 
 if 'Item inspector' in tabs:
     with tabs['Item inspector']:
